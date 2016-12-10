@@ -53,6 +53,7 @@ typedef struct {
 #define PLAYER_ANIMATION_TIME 200
 
 i32 main(i32 argc, char** argv) {
+    srand(time(0));
     if(InitSDL() < 0) {
         return -1;
     }
@@ -113,14 +114,19 @@ i32 main(i32 argc, char** argv) {
                 map.tile_ids[y * map.width + x] = TILE_BRICK;
             } 
             else {
-                map.tile_ids[y * map.width + x] = TILE_DIRT;
+                if(rand() % 40 < 5) {
+                    map.tile_ids[y * map.width + x] = TILE_BRICK;
+                }
+                else {
+                    map.tile_ids[y * map.width + x] = TILE_DIRT;
+                }
             }
         }
     }
 
     Player player = {0};
     player.pos = {map_pos.x + 2, map_pos.y + 2};
-    player.size = {1, 1};
+    player.size = {15.0 / (f32)display.pixels_per_meter, 15.0 / (f32)display.pixels_per_meter};
     player.sub_texture_data = {0, 32, TILE_SIZE, TILE_SIZE};
     player.direction = 1;
     player.speed = 2.5;
@@ -143,27 +149,76 @@ i32 main(i32 argc, char** argv) {
         u8* keys_state = (u8*)SDL_GetKeyboardState(0);
 
         bool moved = false;
+        f32 speed = player.speed;
+        if(keys_state[SDL_SCANCODE_LSHIFT]) {
+            speed *= 2.5;
+        }
         if(keys_state[SDL_SCANCODE_UP] && !keys_state[SDL_SCANCODE_DOWN]) {
-            player.pos.y -= player.speed * last_delta;
             player.direction = UP;
             moved = true;
+
+            i32 tile_x = roundf((((player.pos.x - (player.size.w / 2) - map_pos.x) * display.pixels_per_meter)) / TILE_SIZE);
+            i32 tile_y = roundf((((player.pos.y - (player.size.h / 2) - map_pos.y) * display.pixels_per_meter) - 1) / TILE_SIZE);
+            Tile* tile_left_corner = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+            tile_x = roundf((((player.pos.x + (player.size.w / 2) - map_pos.x) * display.pixels_per_meter)) / TILE_SIZE);
+            tile_y = roundf((((player.pos.y - (player.size.h / 2) - map_pos.y) * display.pixels_per_meter) - 1) / TILE_SIZE);
+            Tile* tile_right_corner = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+            if(!tile_left_corner->solid && !tile_right_corner->solid) {
+                player.pos.y -= speed * last_delta;
+            }
         }
         else if(keys_state[SDL_SCANCODE_DOWN] && !keys_state[SDL_SCANCODE_UP]) {
-            player.pos.y += player.speed * last_delta;
             player.direction = DOWN;
             moved = true;
+
+            i32 tile_x = roundf((((player.pos.x - (player.size.w / 2) - map_pos.x) * display.pixels_per_meter)) / TILE_SIZE);
+            i32 tile_y = roundf((((player.pos.y + (player.size.h / 2) - map_pos.y) * display.pixels_per_meter) + 1) / TILE_SIZE);
+            Tile* tile_left_corner = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+            tile_x = roundf((((player.pos.x + (player.size.w / 2) - map_pos.x) * display.pixels_per_meter)) / TILE_SIZE);
+            tile_y = roundf((((player.pos.y + (player.size.h / 2) - map_pos.y) * display.pixels_per_meter) + 1) / TILE_SIZE);
+            Tile* tile_right_corner = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+            if(!tile_left_corner->solid && !tile_right_corner->solid) {
+                player.pos.y += speed * last_delta;
+            }
         }
 
         if(keys_state[SDL_SCANCODE_LEFT] && !keys_state[SDL_SCANCODE_RIGHT]) {
-            player.pos.x -= player.speed * last_delta;
             player.direction = LEFT;
             moved = true;
+
+            i32 tile_x = roundf((((player.pos.x - (player.size.w / 2) - map_pos.x) * display.pixels_per_meter) - 1) / TILE_SIZE);
+            i32 tile_y = roundf((((player.pos.y + (player.size.h / 2) - map_pos.y) * display.pixels_per_meter)) / TILE_SIZE);
+            Tile* tile_bottom_corner = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+            tile_x = roundf((((player.pos.x - (player.size.w / 2) - map_pos.x) * display.pixels_per_meter) - 1) / TILE_SIZE);
+            tile_y = roundf((((player.pos.y - (player.size.h / 2) - map_pos.y) * display.pixels_per_meter)) / TILE_SIZE);
+            Tile* tile_top_corner = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+            if(!tile_bottom_corner->solid && !tile_top_corner->solid) {
+                player.pos.x -= speed * last_delta;
+            }
         }
         else if(keys_state[SDL_SCANCODE_RIGHT] && !keys_state[SDL_SCANCODE_LEFT]) {
-            player.pos.x += player.speed * last_delta;
             player.direction = RIGHT;
             moved = true;
+
+            i32 tile_x = roundf((((player.pos.x + (player.size.w / 2) - map_pos.x) * display.pixels_per_meter) + 1) / TILE_SIZE);
+            i32 tile_y = roundf((((player.pos.y + (player.size.h / 2) - map_pos.y) * display.pixels_per_meter)) / TILE_SIZE);
+            Tile* tile_bottom_corner = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+            tile_x = roundf((((player.pos.x + (player.size.w / 2) - map_pos.x) * display.pixels_per_meter) + 1) / TILE_SIZE);
+            tile_y = roundf((((player.pos.y - (player.size.h / 2) - map_pos.y) * display.pixels_per_meter)) / TILE_SIZE);
+            Tile* tile_top_corner = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+            if(!tile_bottom_corner->solid && !tile_top_corner->solid) {
+                player.pos.x += speed * last_delta;
+            }
         }
+
         if(!moved && player.moving) {
             player.moving = false;
         }
@@ -172,6 +227,38 @@ i32 main(i32 argc, char** argv) {
             player.moving = true;
             ms_per_animation = 0; 
         }
+
+        // i32 tile_x = (player.pos.x - map_pos.x) * display.pixels_per_meter / TILE_SIZE;
+        // i32 tile_y = (player.pos.y - (player.size.h / 2) - map_pos.y) * display.pixels_per_meter / TILE_SIZE;
+        // Tile* tile_above1 = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+        // tile_x = (player.pos.x - map_pos.x) * display.pixels_per_meter / TILE_SIZE;
+        // tile_y = (player.pos.y - map_pos.y) * display.pixels_per_meter / TILE_SIZE;
+        // Tile* tile_below = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+        // tile_x = (player.pos.x - map_pos.x) * display.pixels_per_meter / TILE_SIZE;
+        // tile_y = (player.pos.y - map_pos.y) * display.pixels_per_meter / TILE_SIZE;
+        // Tile* tile_left = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+        
+        // tile_x = (player.pos.x + player.size.w - map_pos.x) * display.pixels_per_meter / TILE_SIZE;
+        // tile_y = (player.pos.y - player.size.h - map_pos.y) * display.pixels_per_meter / TILE_SIZE;
+        // Tile* tile_right = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+        // if(!tile_above->solid || !tile_below->solid) {
+        //     player.pos.y = player.pos.y;
+        // }
+        // if(!tile_left->solid || !tile_right->solid) {
+        //     player.pos.x = player.pos.x;
+        // }
+
+        // i32 tile_x = (player.pos.x - map_pos.x) * display.pixels_per_meter / TILE_SIZE;
+        // i32 tile_y = (player.pos.y - map_pos.y) * display.pixels_per_meter / TILE_SIZE;
+        // Tile* tile = &tiles[map.tile_ids[tile_y * map.width + tile_x]];
+
+        // if(!tile->solid) {
+        //     player.pos = player.pos;
+        // }
+
 
         SDL_RenderClear(display.renderer);
         for(i32 i = 0; i < display.pixel_buffer.height * display.pixel_buffer.width; i++) {

@@ -17,6 +17,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <math.h>
 
 typedef int8_t i8;
 typedef int16_t i16;
@@ -155,10 +156,11 @@ void RenderFilledRect(Display* display, Vec2* pos, Vec2* size, u32 colour) {
 }
 
 void RenderTexture(Display* display, Vec2* pos, Texture* texture) {
-    i32 x_min = pos->x * display->pixels_per_meter;
-    i32 x_max = x_min + texture->width;
-    i32 y_min = pos->y * display->pixels_per_meter;
-    i32 y_max = y_min + texture->height;
+    // render from the center
+    i32 x_min = (pos->x * display->pixels_per_meter) - (texture->width / 2);
+    i32 x_max = (pos->x * display->pixels_per_meter) + (texture->width / 2);
+    i32 y_min = (pos->y * display->pixels_per_meter) - (texture->height / 2);
+    i32 y_max = (pos->y * display->pixels_per_meter) + (texture->height / 2);
 
     // Don't bother rendering if the texture is completly off the screen.
     if(x_max < 0 || x_min >= display->pixel_buffer.width || y_max < 0 || y_min >= display->pixel_buffer.height) {
