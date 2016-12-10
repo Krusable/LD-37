@@ -30,13 +30,19 @@ typedef float f32;
 typedef double f64;
 
 typedef struct {
+    void* pixels;
+    i32 pixels_size;
     i32 width;
     i32 height;
-    i64 pixel_buffer_size;
-    i32 pixel_buffer_pitch;
+    i32 pitch;
+} Pixel_Buffer;
+
+typedef struct {
+    i32 width;
+    i32 height;
     i32 pixels_per_meter;
     SDL_PixelFormat* pixel_format;
-    void* pixel_buffer;
+    Pixel_Buffer pixel_buffer;
     char* title;
     SDL_Window* window;
     SDL_Renderer* renderer;
@@ -134,14 +140,14 @@ void RenderFilledRect(Display* display, Vec2* pos, Vec2* size, u32 colour) {
     i32 y_max = y_min + (size->h * display->pixels_per_meter);
 
     // Don't bother rendering if the rect is completly off the screen.
-    if(x_max < 0 || x_min >= display->width || y_max < 0 || y_min >= display->height) {
+    if(x_max < 0 || x_min >= display->pixel_buffer.width || y_max < 0 || y_min >= display->pixel_buffer.height) {
         return;
     }
 
     for(i32 y = y_min; y < y_max; y++) {
         for(i32 x = x_min; x < x_max; x++) {
-            if(x >= 0 && x < display->width && y >= 0 && y < display->height) {
-                u32* display_pixel = (u32*)display->pixel_buffer + (y * display->width) + x;
+            if(x >= 0 && x < display->pixel_buffer.width && y >= 0 && y < display->pixel_buffer.height) {
+                u32* display_pixel = (u32*)display->pixel_buffer.pixels + (y * display->pixel_buffer.width) + x;
                 *display_pixel = colour;
             }
         }
@@ -155,14 +161,14 @@ void RenderTexture(Display* display, Vec2* pos, Texture* texture) {
     i32 y_max = y_min + texture->height;
 
     // Don't bother rendering if the texture is completly off the screen.
-    if(x_max < 0 || x_min >= display->width || y_max < 0 || y_min >= display->height) {
+    if(x_max < 0 || x_min >= display->pixel_buffer.width || y_max < 0 || y_min >= display->pixel_buffer.height) {
         return;
     }
 
     for(i32 y = y_min, ty = 0; y < y_max; y++, ty++) {
         for(i32 x = x_min, tx = 0; x < x_max; x++, tx++) {
-            if(x >= 0 && x < display->width && y >= 0 && y < display->height) {
-                u32* display_pixel = (u32*)display->pixel_buffer + (y * display->width) + x;
+            if(x >= 0 && x < display->pixel_buffer.width && y >= 0 && y < display->pixel_buffer.height) {
+                u32* display_pixel = (u32*)display->pixel_buffer.pixels + (y * display->pixel_buffer.width) + x;
                 u32* texture_pixel = (u32*)texture->pixels + (ty * texture->width) + tx;
                 if(*texture_pixel != TRANSPARENT_COLOUR) {
                     *display_pixel = *texture_pixel;
@@ -180,14 +186,14 @@ void RenderSubTexture(Display* display, Vec2* pos, Texture* texture, i32 sub_tex
     i32 y_max = y_min + sub_texture_h;
 
     // Don't bother rendering if the texture is completly off the screen.
-    if(x_max < 0 || x_min >= display->width || x_max < 0 || x_min >= display->width) {
+    if(x_max < 0 || x_min >= display->pixel_buffer.width || x_max < 0 || x_min >= display->pixel_buffer.width) {
         return;
     }
 
     for(i32 y = y_min, ty = sub_texture_y; y < y_max; y++, ty++) {
         for(i32 x = x_min, tx = sub_texture_x; x < x_max; x++, tx++) {
-            if(x >= 0 && x < display->width && y >= 0 && y < display->height) {
-                u32* display_pixel = (u32*)display->pixel_buffer + (y * display->width) + x;
+            if(x >= 0 && x < display->pixel_buffer.width && y >= 0 && y < display->pixel_buffer.height) {
+                u32* display_pixel = (u32*)display->pixel_buffer.pixels + (y * display->pixel_buffer.width) + x;
                 u32* texture_pixel = (u32*)texture->pixels + (ty * texture->width) + tx;
                 if(*texture_pixel != TRANSPARENT_COLOUR) {
                     *display_pixel = *texture_pixel;
@@ -206,14 +212,14 @@ void RenderSubTextureEx(Display* display, Vec2* pos, Texture* texture, i32 sub_t
     i32 y_max = y_min + sub_texture_h;
 
     // Don't bother rendering if the texture is completly off the screen.
-    if(x_max < 0 || x_min >= display->width || x_max < 0 || x_min >= display->width) {
+    if(x_max < 0 || x_min >= display->pixel_buffer.width || x_max < 0 || x_min >= display->pixel_buffer.width) {
         return;
     }
 
     for(i32 y = y_min, ty = sub_texture_y; y < y_max; y++, ty++) {
         for(i32 x = x_min, tx = sub_texture_x; x < x_max; x++, tx++) {
-            if(x >= 0 && x < display->width && y >= 0 && y < display->height) {
-                u32* display_pixel = (u32*)display->pixel_buffer + (y * display->width) + x;
+            if(x >= 0 && x < display->pixel_buffer.width && y >= 0 && y < display->pixel_buffer.height) {
+                u32* display_pixel = (u32*)display->pixel_buffer.pixels + (y * display->pixel_buffer.width) + x;
                 u32* texture_pixel = (u32*)texture->pixels + (ty * texture->width) + tx;
                 if(*texture_pixel != TRANSPARENT_COLOUR) {
                     if(*texture_pixel == REPLACEMENT_COLOUR_1) {
