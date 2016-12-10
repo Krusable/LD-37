@@ -30,42 +30,6 @@ typedef uint64_t u64;
 typedef float f32;
 typedef double f64;
 
-typedef struct {
-    void* pixels;
-    i32 pixels_size;
-    i32 width;
-    i32 height;
-    i32 pitch;
-} Pixel_Buffer;
-
-typedef struct {
-    i32 width;
-    i32 height;
-    i32 pixels_per_meter;
-    SDL_PixelFormat* pixel_format;
-    Pixel_Buffer pixel_buffer;
-    char* title;
-    SDL_Window* window;
-    SDL_Renderer* renderer;
-    SDL_Texture* texture;
-} Display;
-
-typedef struct {
-    i32 width;
-    i32 height;
-    void* pixels;
-} Texture;
-
-typedef struct {
-    char* char_set;
-    i32 char_set_size;
-    Texture texture_sheet;
-    i32 char_width;
-    i32 char_height;
-    i32 tailed_char_offset;
-    i32 char_spacing;
-} Font;
-
 typedef union {
     struct {
         f32 x;
@@ -93,6 +57,44 @@ typedef union {
         f32 b;
     };
 } Vec4;
+
+typedef struct {
+    void* pixels;
+    i32 pixels_size;
+    i32 width;
+    i32 height;
+    i32 pitch;
+} Pixel_Buffer;
+
+typedef struct {
+    i32 width;
+    i32 height;
+    i32 pixels_per_meter;
+    SDL_PixelFormat* pixel_format;
+    Pixel_Buffer pixel_buffer;
+    char* title;
+    SDL_Window* window;
+    SDL_Renderer* renderer;
+    SDL_Texture* texture;
+    Vec2 camera_pos;
+    Vec2 camera_size;
+} Display;
+
+typedef struct {
+    i32 width;
+    i32 height;
+    void* pixels;
+} Texture;
+
+typedef struct {
+    char* char_set;
+    i32 char_set_size;
+    Texture texture_sheet;
+    i32 char_width;
+    i32 char_height;
+    i32 tailed_char_offset;
+    i32 char_spacing;
+} Font;
 
 typedef struct {
     u64 size;
@@ -135,10 +137,11 @@ u32 ColourVec4ToU32(Vec4* vec4_colour) {
 }
 
 void RenderFilledRect(Display* display, Vec2* pos, Vec2* size, u32 colour) {
-    i32 x_min = pos->x * display->pixels_per_meter;
-    i32 x_max = x_min + (size->w * display->pixels_per_meter);
-    i32 y_min = pos->y * display->pixels_per_meter;
-    i32 y_max = y_min + (size->h * display->pixels_per_meter);
+    // render from the center
+    i32 x_min = roundf((pos->x * display->pixels_per_meter) - (size->w / 2 * display->pixels_per_meter));
+    i32 x_max = roundf((pos->x * display->pixels_per_meter) + (size->w / 2 * display->pixels_per_meter));
+    i32 y_min = roundf((pos->y * display->pixels_per_meter) - (size->h / 2 * display->pixels_per_meter));
+    i32 y_max = roundf((pos->y * display->pixels_per_meter) + (size->h / 2 * display->pixels_per_meter));
 
     // Don't bother rendering if the rect is completly off the screen.
     if(x_max < 0 || x_min >= display->pixel_buffer.width || y_max < 0 || y_min >= display->pixel_buffer.height) {
@@ -157,10 +160,10 @@ void RenderFilledRect(Display* display, Vec2* pos, Vec2* size, u32 colour) {
 
 void RenderTexture(Display* display, Vec2* pos, Texture* texture) {
     // render from the center
-    i32 x_min = (pos->x * display->pixels_per_meter) - (texture->width / 2);
-    i32 x_max = (pos->x * display->pixels_per_meter) + (texture->width / 2);
-    i32 y_min = (pos->y * display->pixels_per_meter) - (texture->height / 2);
-    i32 y_max = (pos->y * display->pixels_per_meter) + (texture->height / 2);
+    i32 x_min = roundf((pos->x * display->pixels_per_meter) - (texture->width / 2));
+    i32 x_max = roundf((pos->x * display->pixels_per_meter) + (texture->width / 2));
+    i32 y_min = roundf((pos->y * display->pixels_per_meter) - (texture->height / 2));
+    i32 y_max = roundf((pos->y * display->pixels_per_meter) + (texture->height / 2));
 
     // Don't bother rendering if the texture is completly off the screen.
     if(x_max < 0 || x_min >= display->pixel_buffer.width || y_max < 0 || y_min >= display->pixel_buffer.height) {
@@ -182,10 +185,11 @@ void RenderTexture(Display* display, Vec2* pos, Texture* texture) {
 
 void RenderSubTexture(Display* display, Vec2* pos, Texture* texture, i32 sub_texture_x, i32 
                       sub_texture_y, i32 sub_texture_w, i32 sub_texture_h) {
-    i32 x_min = pos->x * display->pixels_per_meter;
-    i32 x_max = x_min + sub_texture_w;
-    i32 y_min = pos->y * display->pixels_per_meter;
-    i32 y_max = y_min + sub_texture_h;
+    // render from the center
+    i32 x_min = roundf((pos->x * display->pixels_per_meter) - (sub_texture_w / 2));
+    i32 x_max = roundf((pos->x * display->pixels_per_meter) + (sub_texture_w / 2));
+    i32 y_min = roundf((pos->y * display->pixels_per_meter) - (sub_texture_h / 2));
+    i32 y_max = roundf((pos->y * display->pixels_per_meter) + (sub_texture_h / 2));
 
     // Don't bother rendering if the texture is completly off the screen.
     if(x_max < 0 || x_min >= display->pixel_buffer.width || x_max < 0 || x_min >= display->pixel_buffer.width) {
