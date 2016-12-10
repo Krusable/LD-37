@@ -1,0 +1,4 @@
+bin\
+cmd_scripts\
+cmd.lnk
+*.sublime*
