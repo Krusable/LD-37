@@ -126,6 +126,8 @@ const f32 ENEMY_PICHFORK_KNOCKBACK_SPEED    = 0.4;
 #define MAP_FILE_START_POS_COLOUR           0x000000FF
 
 const f32 DIAGONAL_MOVEMENT_CONSTANT        = 0.70711;
+const f32 MAP_ROT_ANIM_SPEED_MODIFIER       = 1;
+const f32 MAX_MAP_ROT_SPEED                 = 53;
 
 bool EntityCollidingWithSolidTile(Entity* entity, Map* map, Display* display) {
     bool colliding = false;
@@ -244,6 +246,49 @@ void ReplaceAllSameAdjacentTiles(Map* map, i32 x, i32 y, u16 tile_to_replace, u1
     if(tile_bottom_adj_id == tile_to_replace) {
         map->tile_data[(y + 1) * map->width + x] = (replacement_tile << 16) | 0x0000FFFF;
         ReplaceAllSameAdjacentTiles(map, x, y + 1, tile_to_replace, replacement_tile);
+    }
+}
+
+void LoadEnemiesList(Enemy_List* list, Map* map) {
+    if(list->enemies) {
+        free(list->enemies);
+    }
+
+    list->num_enemies = rand() % (NUM_ENEMIES_MAX - NUM_ENEMIES_MIN) + NUM_ENEMIES_MIN;
+    list->num_alive_enemies = list->num_enemies;
+    printf("%d enemies created\n", list->num_enemies);
+    list->enemies = (Enemy*)malloc(sizeof(Enemy) * list->num_enemies);
+
+    for(i32 i = 0; i < list->num_enemies; i++) {
+        Enemy* enemy = &list->enemies[i];
+        // Only spawn on dirt tiles
+        while(true) {
+            i32 tile_x = rand() % (i32)(map->width * TILE_SIZE_IN_METERS.w);
+            i32 tile_y = rand() % (i32)(map->height * TILE_SIZE_IN_METERS.w);
+            u16 tile_id = (u16)((map->tile_data[tile_y * map->width + tile_x] >> 16) & 0x0000FFFF);
+
+            if(tile_id == TILE_DIRT) {
+                enemy->pos.x = tile_x;
+                enemy->pos.y = tile_y;
+                break;
+            }
+        }
+
+        enemy->size = {15.0 / PIXELS_PER_METER, 15.0 / PIXELS_PER_METER};
+        enemy->walk_anim_tex_data = {0, 80, 16, 16};
+        enemy->attack_anim_tex_data = {80, 80, 16, 16};
+        enemy->direction = rand() % 4;
+        enemy->speed = ENEMY_WANDER_SPEED;
+        enemy->chase_speed = ENEMY_CHASE_SPEED;
+        enemy->ai_state = AI_STATE_WANDER;
+        enemy->anim_frame = 0;
+        enemy->anim_timer = 0;
+        enemy->knockback_frames = 0;
+        enemy->knockback_direction = 0;
+        enemy->health = ENEMY_HEALTH;
+        enemy->damage = ENEMY_DAMAGE;
+        enemy->knockback_speed = 0;
+        enemy->alive = true;
     }
 }
 
@@ -422,51 +467,22 @@ i32 main(i32 argc, char** argv) {
 
     // Create Enemeies
     Enemy_List enemy_list = {0};
-    enemy_list.num_enemies = rand() % (NUM_ENEMIES_MAX - NUM_ENEMIES_MIN) + NUM_ENEMIES_MIN;
-    enemy_list.num_alive_enemies = enemy_list.num_enemies;
-    printf("%d enemies created\n", enemy_list.num_enemies);
-    enemy_list.enemies = (Enemy*)malloc(sizeof(Enemy) * enemy_list.num_enemies);
-
-    for(i32 i = 0; i < enemy_list.num_enemies; i++) {
-        Enemy* enemy = &enemy_list.enemies[i];
-        // Only spawn on dirt tiles
-        while(true) {
-            i32 tile_x = rand() % (i32)(map.width * TILE_SIZE_IN_METERS.w);
-            i32 tile_y = rand() % (i32)(map.height * TILE_SIZE_IN_METERS.w);
-            u16 tile_id = (u16)((map.tile_data[tile_y * map.width + tile_x] >> 16) & 0x0000FFFF);
-
-            if(tile_id == TILE_DIRT) {
-                enemy->pos.x = tile_x;
-                enemy->pos.y = tile_y;
-                break;
-            }
-        }
-
-        enemy->size = {15.0 / PIXELS_PER_METER, 15.0 / PIXELS_PER_METER};
-        enemy->walk_anim_tex_data = {0, 80, 16, 16};
-        enemy->attack_anim_tex_data = {80, 80, 16, 16};
-        enemy->direction = rand() % 4;
-        enemy->speed = ENEMY_WANDER_SPEED;
-        enemy->chase_speed = ENEMY_CHASE_SPEED;
-        enemy->ai_state = AI_STATE_WANDER;
-        enemy->anim_frame = 0;
-        enemy->anim_timer = 0;
-        enemy->knockback_frames = 0;
-        enemy->knockback_direction = 0;
-        enemy->health = ENEMY_HEALTH;
-        enemy->damage = ENEMY_DAMAGE;
-        enemy->knockback_speed = 0;
-        enemy->alive = true;
-    }
+    LoadEnemiesList(&enemy_list, &map);
 
     display.camera_pos = {player.pos.x - ((f32)display.pixel_buffer.width / 2.0 / (f32)display.pixels_per_meter), 
                           player.pos.y - ((f32)display.pixel_buffer.height / 2.0 / (f32)display.pixels_per_meter)};
     display.camera_size = {(f32)display.pixel_buffer.width / (f32)display.pixels_per_meter, 
                            (f32)display.pixel_buffer.height / (f32)display.pixels_per_meter};
 
+    // Game Loop
     bool running = true;
     SDL_Event event = {0};
     f32 last_delta = 0.0f;
+    bool animating_map = false;
+    i32 map_animation_step = 0; // 0 for speed up 1 for speed down 2 for flip and change map
+    f32 map_rot = 0;
+    f32 map_rot_speed = 0;
+    SDL_RendererFlip map_flip = SDL_FLIP_NONE;
     while(running) {
         bool attacked = false;
         i32 ms_before = SDL_GetTicks();
@@ -485,457 +501,455 @@ i32 main(i32 argc, char** argv) {
         }
 
         // Update Enemy
-#if UPDATE_ENEMIES
-        for(i32 i = 0; i < enemy_list.num_enemies; i++) {
-            Enemy* enemy = &enemy_list.enemies[i];
-            if(!enemy->alive) {
-                continue;
-            }
-
-            bool moved = false;
-
-            // Handle AI 
-            switch(enemy->ai_state) {
-                case AI_STATE_WANDER: {
-                    if(player.pos.x >= enemy->pos.x - 3.5 && player.pos.x <= enemy->pos.x + 3.5 &&
-                        player.pos.y >= enemy->pos.y - 3.5 && player.pos.y <= enemy->pos.y + 3.5) {
-                        
-                        enemy->ai_state = AI_STATE_CHASE;
-                        enemy->anim_state = ANIM_STATE_WALK;
-                        enemy->anim_frame = 0;
-                        enemy->anim_timer = ENEMY_WALK_ANIMATION_TIME;
-                        break;
-                    }
-
-                    if((player.pos.x >= enemy->pos.x - 0.5 && player.pos.x <= enemy->pos.x + 0.5) &&
-                        (player.pos.y >= enemy->pos.y - 0.5 && player.pos.y <= enemy->pos.y + 0.5)) {
-                        
-                        enemy->ai_state = AI_STATE_ATTACK;
-                        enemy->anim_state = ANIM_STATE_ATTACK;
-                        enemy->anim_timer = ENEMY_ATTACK_ANIMATION_TIME_FRAME_0;
-                        enemy->anim_frame = 0;
-                        break;
-                    }
-
-                    if(enemy->anim_state == ANIM_STATE_WALK) {
-                        bool reached_destination = false;
-                        Entity temp_enemy = {enemy->pos, enemy->size};
-                        switch(enemy->direction) {
-                            case UP: {
-                                temp_enemy.pos.y -= enemy->speed * last_delta;
-                                if(EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
-                                    reached_destination = true;
-                                    break;
-                                }
-
-                                enemy->pos.y = temp_enemy.pos.y;
-                                if(enemy->pos.y <= enemy->wander_destination.y){
-                                    reached_destination = true;
-                                }
-                            } break;
-
-                            case DOWN: {
-                                temp_enemy.pos.y += enemy->speed * last_delta;
-                                if(EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
-                                    reached_destination = true;
-                                    break;
-                                }
-
-                                enemy->pos.y = temp_enemy.pos.y;
-                                if(enemy->pos.y >= enemy->wander_destination.y){
-                                    reached_destination = true;
-                                }
-                            } break;
-
-                            case LEFT: {
-                                temp_enemy.pos.x -= enemy->speed * last_delta;
-                                if(EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
-                                    reached_destination = true;
-                                    break;
-                                }
-
-                                enemy->pos.x = temp_enemy.pos.x;
-                                if(enemy->pos.x <= enemy->wander_destination.x){
-                                    reached_destination = true;
-                                }
-                            } break;
-
-                            case RIGHT: {
-                                temp_enemy.pos.x += enemy->speed * last_delta;
-                                if(EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
-                                    reached_destination = true;
-                                    break;
-                                }
-
-                                enemy->pos.x = temp_enemy.pos.x;
-                                if(enemy->pos.x >= enemy->wander_destination.x){
-                                    reached_destination = true;
-                                }
-                            } break;
-                        }
-
-                        if(reached_destination) {
-                            enemy->anim_state = ANIM_STATE_IDLE;
-                            enemy->anim_timer = 0;
-                        }
-                    }
-                    else {
-                        if(rand() % 333 < 10) {
-                            enemy->wander_destination = enemy->pos;
-                            enemy->direction = rand() % 4;
-                            enemy->anim_state = ANIM_STATE_WALK;
-                            enemy->anim_timer = ENEMY_WALK_ANIMATION_TIME;
-
-                            switch(enemy->direction) {
-                                case UP: {
-                                    enemy->wander_destination.y -= rand() % 5 + 2;
-                                } break;
-
-                                case DOWN: {
-                                    enemy->wander_destination.y += rand() % 5 + 2;
-                                } break;
-
-                                case LEFT: {
-                                    enemy->wander_destination.x -= rand() % 5 + 2;
-                                } break;
-
-                                case RIGHT: {
-                                    enemy->wander_destination.x += rand() % 5 + 2;
-                                } break;
-                            }
-                        }
-                    }
-                } break;
-
-                case AI_STATE_CHASE: {
-                    if((player.pos.x >= enemy->pos.x - 0.5 && player.pos.x <= enemy->pos.x + 0.5) &&
-                        (player.pos.y >= enemy->pos.y - 0.5 && player.pos.y <= enemy->pos.y + 0.5)) {
-                        
-                        enemy->ai_state = AI_STATE_ATTACK;
-                        enemy->anim_state = ANIM_STATE_ATTACK;
-                        enemy->anim_timer = ENEMY_ATTACK_ANIMATION_TIME_FRAME_0;
-                        enemy->anim_frame = 0;
-                        break;
-                    }
-
-                    Entity temp_enemy = {enemy->pos, enemy->size};
-                    if(player.pos.y < enemy->pos.y) {
-                        enemy->direction = UP;
-                        temp_enemy.pos.y -= enemy->chase_speed * last_delta;
-                        if(!EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
-                            enemy->pos.y = temp_enemy.pos.y;
-                        }
-                    }
-                    else if(player.pos.y > enemy->pos.y) {
-                        enemy->direction = DOWN;
-                        temp_enemy.pos.y += enemy->chase_speed * last_delta;
-                        if(!EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
-                            enemy->pos.y = temp_enemy.pos.y;
-                        }
-                    }
-
-                    if(player.pos.x < enemy->pos.x) {
-                        enemy->direction = LEFT;
-                        temp_enemy.pos.x -= enemy->chase_speed * last_delta;
-                        if(!EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
-                            enemy->pos.x = temp_enemy.pos.x;
-                        }
-                    }
-                    else if(player.pos.x > enemy->pos.x) {
-                        enemy->direction = RIGHT;
-                        temp_enemy.pos.x += enemy->chase_speed * last_delta;
-                        if(!EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
-                            enemy->pos.x = temp_enemy.pos.x;
-                        }
-                    }
-                } break;
-
-                case AI_STATE_ATTACK: {
-                    if(enemy->anim_timer <= 0 && enemy->anim_frame == 0) {
-                        
-                        enemy->anim_timer = ENEMY_ATTACK_ANIMATION_TIME_FRAME_1;
-                        enemy->anim_frame = 1;
-
-                        Entity enemy_entity = {enemy->pos, enemy->size};
-                        Entity player_entity = {player.pos, player.size};
-
-                        if(EntityCollidingWithEntity(&enemy_entity, &player_entity)) {
-                            Mix_PlayChannel(-1, hit_sound, 0);
-
-                            player.health -= enemy->damage;
-                            printf("Your Health: %d\n", player.health);
-
-                            player.knockback_frames = 6;
-                            player.knockback_direction = enemy->direction;
-                            player.knockback_speed = ENEMY_PICHFORK_KNOCKBACK_SPEED;
-
-                            if(player.health <= 0) {
-                                Mix_PlayChannel(-1, death_sound, 0);
-                                printf("You Died You Suck NOOB!\n");
-                                system("pause");
-                                return 0;
-                            }
-                        }
-                    }
-                    else if(enemy->anim_timer <= 0 && enemy->anim_frame == 1) {
-                        enemy->ai_state = AI_STATE_WANDER;
-                        enemy->anim_frame = 0;
-                        enemy->anim_timer = ENEMY_WALK_ANIMATION_TIME;
-                    }
-                } break;
-
-                default: {
-                    printf("Unknown AI state %d\n", enemy->ai_state);
-                } break;
-            }
-
-            // Update walk animation
-            if(enemy->anim_state == ANIM_STATE_WALK && enemy->anim_timer <= 0) {
-                enemy->anim_frame = (enemy->anim_frame == 0) ? 1 : 0;
-                enemy->anim_timer = ENEMY_WALK_ANIMATION_TIME;
-            }
-
-            // Knock enemy back
-            if(enemy->knockback_frames > 0) {
-                enemy->knockback_frames--;
-                Entity enemy_entity = {enemy->pos, enemy->size};
-
-                switch(enemy->knockback_direction) {
-                    case UP: {
-                        enemy_entity.pos.y -= enemy->knockback_speed;
-                        
-                        if(!EntityCollidingWithSolidTile(&enemy_entity, &map, &display)) {
-                            enemy->pos.y = enemy_entity.pos.y;
-                        }
-                    } break;
-
-                    case DOWN: {
-                        enemy_entity.pos.y += enemy->knockback_speed;
-                        
-                        if(!EntityCollidingWithSolidTile(&enemy_entity, &map, &display)) {
-                            enemy->pos.y = enemy_entity.pos.y;
-                        }
-                    } break;
-
-                    case LEFT: {
-                        enemy_entity.pos.x -= enemy->knockback_speed;
-                        
-                        if(!EntityCollidingWithSolidTile(&enemy_entity, &map, &display)) {
-                            enemy->pos.x = enemy_entity.pos.x;
-                        }
-                    } break;
-
-                    case RIGHT: {
-                        enemy_entity.pos.x += enemy->knockback_speed;
-                        
-                        if(!EntityCollidingWithSolidTile(&enemy_entity, &map, &display)) {
-                            enemy->pos.x = enemy_entity.pos.x;
-                        }
-                    } break;
-                }
-            }
-        }
-
-        if(enemy_list.num_alive_enemies == 0) {
-            printf("Yay you win you are hero!\n");
-            system("pause");
-            return -666;
-        }
-#endif
-        // Update Player
-        u8* keys_state = (u8*)SDL_GetKeyboardState(0);
-
-        bool moved = false;
-        Entity temp_player;
-        temp_player.size = player.size;
-        temp_player.pos = player.pos;
-
-        if(keys_state[SDL_SCANCODE_UP] && !keys_state[SDL_SCANCODE_DOWN]) {
-            if(player.knockback_frames == 0) {
-                player.direction = UP;
-                moved = true;
-                temp_player.pos.y -= player.speed * last_delta;
-
-                #if PLAYER_COLLISION_ON
-                if(!EntityCollidingWithSolidTile(&temp_player, &map, &display)) {
-                    player.pos.y = temp_player.pos.y;
-                }
-                #else
-                player.pos.y = temp_player.pos.y;
-                #endif
-            }
-        }
-        else if(keys_state[SDL_SCANCODE_DOWN] && !keys_state[SDL_SCANCODE_UP]) {
-            if(player.knockback_frames == 0) {
-                player.direction = DOWN;
-                moved = true;
-                temp_player.pos.y += player.speed * last_delta;
-
-                #if PLAYER_COLLISION_ON
-                if(!EntityCollidingWithSolidTile(&temp_player, &map, &display)) {
-                    player.pos.y = temp_player.pos.y;
-                }
-                #else
-                player.pos.y = temp_player.pos.y;
-                #endif
-            }
-        }
-
-        if(keys_state[SDL_SCANCODE_LEFT] && !keys_state[SDL_SCANCODE_RIGHT]) {
-            if(player.knockback_frames == 0) {
-                player.direction = LEFT;
-                moved = true;
-                temp_player.pos.x -= player.speed * last_delta;
-
-                #if PLAYER_COLLISION_ON
-                if(!EntityCollidingWithSolidTile(&temp_player, &map, &display)) {
-                    player.pos.x = temp_player.pos.x;
-                }
-                #else
-                player.pos.x = temp_player.pos.x;
-                #endif
-            }
-        }
-        else if(keys_state[SDL_SCANCODE_RIGHT] && !keys_state[SDL_SCANCODE_LEFT]) {
-            if(player.knockback_frames == 0) {
-                player.direction = RIGHT;
-                moved = true;
-                temp_player.pos.x += player.speed * last_delta;
-
-                #if PLAYER_COLLISION_ON
-                if(!EntityCollidingWithSolidTile(&temp_player, &map, &display)) {
-                    player.pos.x = temp_player.pos.x;
-                }            
-                #else
-                player.pos.x = temp_player.pos.x;
-                #endif
-            }
-        }
-
-        // Knock player back
-        if(player.knockback_frames > 0) {
-            player.knockback_frames--;
-            Entity player_entity = {player.pos, player.size};
-
-            switch(player.knockback_direction) {
-                case UP: {
-                    player_entity.pos.y -= player.knockback_speed;
-                    
-                    if(!EntityCollidingWithSolidTile(&player_entity, &map, &display)) {
-                        player.pos.y = player_entity.pos.y;
-                    }
-                } break;
-
-                case DOWN: {
-                    player_entity.pos.y += player.knockback_speed;
-                    
-                    if(!EntityCollidingWithSolidTile(&player_entity, &map, &display)) {
-                        player.pos.y = player_entity.pos.y;
-                    }
-                } break;
-
-                case LEFT: {
-                    player_entity.pos.x -= player.knockback_speed;
-                    
-                    if(!EntityCollidingWithSolidTile(&player_entity, &map, &display)) {
-                        player.pos.x = player_entity.pos.x;
-                    }
-                } break;
-
-                case RIGHT: {
-                    player_entity.pos.x += player.knockback_speed;
-                    
-                    if(!EntityCollidingWithSolidTile(&player_entity, &map, &display)) {
-                        player.pos.x = player_entity.pos.x;
-                    }
-                } break;
-            }
-        }
-
-        // Player Activation
-        i32 tile_pos_data;
-        if((tile_pos_data = PlayerOnFloorButton(&player, &map)) != -1) {
-            i32 x = (tile_pos_data >> 16) & 0x0000FFFF;
-            i32 y = tile_pos_data & 0x0000FFFF;
-            u32 tile_data = map.tile_data[y * map.width + x];
-            u16 tile_id = (u16)((tile_data >> 16) & 0x0000FFFF);
-            u16 tile_extra_data = (u16)(tile_data & 0x0000FFFF);
-
-            switch(tile_id) {
-                case TILE_BUTTON_UNACTIVATED: {
-                    Mix_PlayChannel(-1, button_activation_sound, 0);
-                    i32 baricade_tile_x = tile_extra_data % map.width;
-                    i32 baricade_tile_y = tile_extra_data / map.width;
-                    ReplaceAllSameAdjacentTiles(&map, baricade_tile_x, baricade_tile_y, TILE_BARRICATE_VIRTICAL, TILE_DIRT);
-                    ReplaceAllSameAdjacentTiles(&map, baricade_tile_x, baricade_tile_y, TILE_BARRICATE_HORIZONTAL, TILE_DIRT);
-                    map.tile_data[y * map.width + x] = (TILE_BUTTON_ACTIVATED << 16) | TILE_NO_EXTRA_DATA;
-                } break;
-            }
-
-        }
-
-        // Player Attack
-        if(attacked) {
-            if(player.anim_state == ANIM_STATE_ATTACK) {
-                player.anim_frame = (player.anim_frame == 0) ? 1 : 0;
-            }else {
-                player.anim_state = ANIM_STATE_ATTACK;
-            }
-
-            player.anim_timer = PLAYER_ATTACK_ANIMATION_TIME;
-
+        if(!animating_map) {
             for(i32 i = 0; i < enemy_list.num_enemies; i++) {
                 Enemy* enemy = &enemy_list.enemies[i];
                 if(!enemy->alive) {
                     continue;
                 }
 
-                Entity enemy_entity = {enemy->pos, enemy->size};
-                Entity player_entity = {player.pos, player.size};
+                bool moved = false;
 
-                if(EntityCollidingWithEntity(&player_entity, &enemy_entity)) {
-                    Mix_PlayChannel(-1, hit_sound, 0);
+                // Handle AI 
+                switch(enemy->ai_state) {
+                    case AI_STATE_WANDER: {
+                        if(player.pos.x >= enemy->pos.x - 3.5 && player.pos.x <= enemy->pos.x + 3.5 &&
+                            player.pos.y >= enemy->pos.y - 3.5 && player.pos.y <= enemy->pos.y + 3.5) {
+                            
+                            enemy->ai_state = AI_STATE_CHASE;
+                            enemy->anim_state = ANIM_STATE_WALK;
+                            enemy->anim_frame = 0;
+                            enemy->anim_timer = ENEMY_WALK_ANIMATION_TIME;
+                            break;
+                        }
 
-                    enemy->health -= player.damage;
-                    enemy->knockback_frames = 6;
-                    enemy->knockback_direction = player.direction;
-                    enemy->knockback_speed = PLAYER_PUNCH_KNOCKBACK_SPEED;
+                        if((player.pos.x >= enemy->pos.x - 0.5 && player.pos.x <= enemy->pos.x + 0.5) &&
+                            (player.pos.y >= enemy->pos.y - 0.5 && player.pos.y <= enemy->pos.y + 0.5)) {
+                            
+                            enemy->ai_state = AI_STATE_ATTACK;
+                            enemy->anim_state = ANIM_STATE_ATTACK;
+                            enemy->anim_timer = ENEMY_ATTACK_ANIMATION_TIME_FRAME_0;
+                            enemy->anim_frame = 0;
+                            break;
+                        }
 
-                    if(enemy->health <= 0) {
-                        Mix_PlayChannel(-1, death_sound, 0);
-                        enemy->alive = false;
-                        enemy_list.num_alive_enemies--;
+                        if(enemy->anim_state == ANIM_STATE_WALK) {
+                            bool reached_destination = false;
+                            Entity temp_enemy = {enemy->pos, enemy->size};
+                            switch(enemy->direction) {
+                                case UP: {
+                                    temp_enemy.pos.y -= enemy->speed * last_delta;
+                                    if(EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
+                                        reached_destination = true;
+                                        break;
+                                    }
+
+                                    enemy->pos.y = temp_enemy.pos.y;
+                                    if(enemy->pos.y <= enemy->wander_destination.y){
+                                        reached_destination = true;
+                                    }
+                                } break;
+
+                                case DOWN: {
+                                    temp_enemy.pos.y += enemy->speed * last_delta;
+                                    if(EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
+                                        reached_destination = true;
+                                        break;
+                                    }
+
+                                    enemy->pos.y = temp_enemy.pos.y;
+                                    if(enemy->pos.y >= enemy->wander_destination.y){
+                                        reached_destination = true;
+                                    }
+                                } break;
+
+                                case LEFT: {
+                                    temp_enemy.pos.x -= enemy->speed * last_delta;
+                                    if(EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
+                                        reached_destination = true;
+                                        break;
+                                    }
+
+                                    enemy->pos.x = temp_enemy.pos.x;
+                                    if(enemy->pos.x <= enemy->wander_destination.x){
+                                        reached_destination = true;
+                                    }
+                                } break;
+
+                                case RIGHT: {
+                                    temp_enemy.pos.x += enemy->speed * last_delta;
+                                    if(EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
+                                        reached_destination = true;
+                                        break;
+                                    }
+
+                                    enemy->pos.x = temp_enemy.pos.x;
+                                    if(enemy->pos.x >= enemy->wander_destination.x){
+                                        reached_destination = true;
+                                    }
+                                } break;
+                            }
+
+                            if(reached_destination) {
+                                enemy->anim_state = ANIM_STATE_IDLE;
+                                enemy->anim_timer = 0;
+                            }
+                        }
+                        else {
+                            if(rand() % 333 < 10) {
+                                enemy->wander_destination = enemy->pos;
+                                enemy->direction = rand() % 4;
+                                enemy->anim_state = ANIM_STATE_WALK;
+                                enemy->anim_timer = ENEMY_WALK_ANIMATION_TIME;
+
+                                switch(enemy->direction) {
+                                    case UP: {
+                                        enemy->wander_destination.y -= rand() % 5 + 2;
+                                    } break;
+
+                                    case DOWN: {
+                                        enemy->wander_destination.y += rand() % 5 + 2;
+                                    } break;
+
+                                    case LEFT: {
+                                        enemy->wander_destination.x -= rand() % 5 + 2;
+                                    } break;
+
+                                    case RIGHT: {
+                                        enemy->wander_destination.x += rand() % 5 + 2;
+                                    } break;
+                                }
+                            }
+                        }
+                    } break;
+
+                    case AI_STATE_CHASE: {
+                        if((player.pos.x >= enemy->pos.x - 0.5 && player.pos.x <= enemy->pos.x + 0.5) &&
+                            (player.pos.y >= enemy->pos.y - 0.5 && player.pos.y <= enemy->pos.y + 0.5)) {
+                            
+                            enemy->ai_state = AI_STATE_ATTACK;
+                            enemy->anim_state = ANIM_STATE_ATTACK;
+                            enemy->anim_timer = ENEMY_ATTACK_ANIMATION_TIME_FRAME_0;
+                            enemy->anim_frame = 0;
+                            break;
+                        }
+
+                        Entity temp_enemy = {enemy->pos, enemy->size};
+                        if(player.pos.y < enemy->pos.y) {
+                            enemy->direction = UP;
+                            temp_enemy.pos.y -= enemy->chase_speed * last_delta;
+                            if(!EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
+                                enemy->pos.y = temp_enemy.pos.y;
+                            }
+                        }
+                        else if(player.pos.y > enemy->pos.y) {
+                            enemy->direction = DOWN;
+                            temp_enemy.pos.y += enemy->chase_speed * last_delta;
+                            if(!EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
+                                enemy->pos.y = temp_enemy.pos.y;
+                            }
+                        }
+
+                        if(player.pos.x < enemy->pos.x) {
+                            enemy->direction = LEFT;
+                            temp_enemy.pos.x -= enemy->chase_speed * last_delta;
+                            if(!EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
+                                enemy->pos.x = temp_enemy.pos.x;
+                            }
+                        }
+                        else if(player.pos.x > enemy->pos.x) {
+                            enemy->direction = RIGHT;
+                            temp_enemy.pos.x += enemy->chase_speed * last_delta;
+                            if(!EntityCollidingWithSolidTile(&temp_enemy, &map, &display)) {
+                                enemy->pos.x = temp_enemy.pos.x;
+                            }
+                        }
+                    } break;
+
+                    case AI_STATE_ATTACK: {
+                        if(enemy->anim_timer <= 0 && enemy->anim_frame == 0) {
+                            
+                            enemy->anim_timer = ENEMY_ATTACK_ANIMATION_TIME_FRAME_1;
+                            enemy->anim_frame = 1;
+
+                            Entity enemy_entity = {enemy->pos, enemy->size};
+                            Entity player_entity = {player.pos, player.size};
+
+                            if(EntityCollidingWithEntity(&enemy_entity, &player_entity)) {
+                                Mix_PlayChannel(-1, hit_sound, 0);
+
+                                player.health -= enemy->damage;
+                                printf("Your Health: %d\n", player.health);
+
+                                player.knockback_frames = 6;
+                                player.knockback_direction = enemy->direction;
+                                player.knockback_speed = ENEMY_PICHFORK_KNOCKBACK_SPEED;
+
+                                if(player.health <= 0) {
+                                    Mix_PlayChannel(-1, death_sound, 0);
+                                    printf("You Died You Suck NOOB!\n");
+                                    system("pause");
+                                    return 0;
+                                }
+                            }
+                        }
+                        else if(enemy->anim_timer <= 0 && enemy->anim_frame == 1) {
+                            enemy->ai_state = AI_STATE_WANDER;
+                            enemy->anim_frame = 0;
+                            enemy->anim_timer = ENEMY_WALK_ANIMATION_TIME;
+                        }
+                    } break;
+
+                    default: {
+                        printf("Unknown AI state %d\n", enemy->ai_state);
+                    } break;
+                }
+
+                // Update walk animation
+                if(enemy->anim_state == ANIM_STATE_WALK && enemy->anim_timer <= 0) {
+                    enemy->anim_frame = (enemy->anim_frame == 0) ? 1 : 0;
+                    enemy->anim_timer = ENEMY_WALK_ANIMATION_TIME;
+                }
+
+                // Knock enemy back
+                if(enemy->knockback_frames > 0) {
+                    enemy->knockback_frames--;
+                    Entity enemy_entity = {enemy->pos, enemy->size};
+
+                    switch(enemy->knockback_direction) {
+                        case UP: {
+                            enemy_entity.pos.y -= enemy->knockback_speed;
+                            
+                            if(!EntityCollidingWithSolidTile(&enemy_entity, &map, &display)) {
+                                enemy->pos.y = enemy_entity.pos.y;
+                            }
+                        } break;
+
+                        case DOWN: {
+                            enemy_entity.pos.y += enemy->knockback_speed;
+                            
+                            if(!EntityCollidingWithSolidTile(&enemy_entity, &map, &display)) {
+                                enemy->pos.y = enemy_entity.pos.y;
+                            }
+                        } break;
+
+                        case LEFT: {
+                            enemy_entity.pos.x -= enemy->knockback_speed;
+                            
+                            if(!EntityCollidingWithSolidTile(&enemy_entity, &map, &display)) {
+                                enemy->pos.x = enemy_entity.pos.x;
+                            }
+                        } break;
+
+                        case RIGHT: {
+                            enemy_entity.pos.x += enemy->knockback_speed;
+                            
+                            if(!EntityCollidingWithSolidTile(&enemy_entity, &map, &display)) {
+                                enemy->pos.x = enemy_entity.pos.x;
+                            }
+                        } break;
                     }
                 }
             }
-        }
 
-        if(!moved && player.anim_state == ANIM_STATE_WALK) {
-            player.anim_state = ANIM_STATE_IDLE;
-        }
-        else if(moved && player.anim_state == ANIM_STATE_IDLE) {
-            player.anim_state = ANIM_STATE_WALK;
-            // Start at 0 so the we advance the frames as soon as we start moving.
-            player.anim_timer = 0;
-        }
-
-        if(player.anim_state != ANIM_STATE_IDLE && player.anim_timer <= 0) {
-            player.anim_frame = (player.anim_frame == 0) ? 1 : 0;
-            switch(player.anim_state) {
-                case ANIM_STATE_WALK: {
-                    player.anim_timer = PLAYER_WALK_ANIMATION_TIME;
-                } break;
-
-                case ANIM_STATE_ATTACK: {
-                    player.anim_timer = 0;
-                    player.anim_state = ANIM_STATE_IDLE;
-                } break;
+            if(enemy_list.num_alive_enemies == 0) {
+                animating_map = true;
             }
+
+            // Update Player
+            u8* keys_state = (u8*)SDL_GetKeyboardState(0);
+
+            bool moved = false;
+            Entity temp_player;
+            temp_player.size = player.size;
+            temp_player.pos = player.pos;
+
+            if(keys_state[SDL_SCANCODE_UP] && !keys_state[SDL_SCANCODE_DOWN]) {
+                if(player.knockback_frames == 0) {
+                    player.direction = UP;
+                    moved = true;
+                    temp_player.pos.y -= player.speed * last_delta;
+
+                    #if PLAYER_COLLISION_ON
+                    if(!EntityCollidingWithSolidTile(&temp_player, &map, &display)) {
+                        player.pos.y = temp_player.pos.y;
+                    }
+                    #else
+                    player.pos.y = temp_player.pos.y;
+                    #endif
+                }
+            }
+            else if(keys_state[SDL_SCANCODE_DOWN] && !keys_state[SDL_SCANCODE_UP]) {
+                if(player.knockback_frames == 0) {
+                    player.direction = DOWN;
+                    moved = true;
+                    temp_player.pos.y += player.speed * last_delta;
+
+                    #if PLAYER_COLLISION_ON
+                    if(!EntityCollidingWithSolidTile(&temp_player, &map, &display)) {
+                        player.pos.y = temp_player.pos.y;
+                    }
+                    #else
+                    player.pos.y = temp_player.pos.y;
+                    #endif
+                }
+            }
+
+            if(keys_state[SDL_SCANCODE_LEFT] && !keys_state[SDL_SCANCODE_RIGHT]) {
+                if(player.knockback_frames == 0) {
+                    player.direction = LEFT;
+                    moved = true;
+                    temp_player.pos.x -= player.speed * last_delta;
+
+                    #if PLAYER_COLLISION_ON
+                    if(!EntityCollidingWithSolidTile(&temp_player, &map, &display)) {
+                        player.pos.x = temp_player.pos.x;
+                    }
+                    #else
+                    player.pos.x = temp_player.pos.x;
+                    #endif
+                }
+            }
+            else if(keys_state[SDL_SCANCODE_RIGHT] && !keys_state[SDL_SCANCODE_LEFT]) {
+                if(player.knockback_frames == 0) {
+                    player.direction = RIGHT;
+                    moved = true;
+                    temp_player.pos.x += player.speed * last_delta;
+
+                    #if PLAYER_COLLISION_ON
+                    if(!EntityCollidingWithSolidTile(&temp_player, &map, &display)) {
+                        player.pos.x = temp_player.pos.x;
+                    }            
+                    #else
+                    player.pos.x = temp_player.pos.x;
+                    #endif
+                }
+            }
+
+            // Knock player back
+            if(player.knockback_frames > 0) {
+                player.knockback_frames--;
+                Entity player_entity = {player.pos, player.size};
+
+                switch(player.knockback_direction) {
+                    case UP: {
+                        player_entity.pos.y -= player.knockback_speed;
+                        
+                        if(!EntityCollidingWithSolidTile(&player_entity, &map, &display)) {
+                            player.pos.y = player_entity.pos.y;
+                        }
+                    } break;
+
+                    case DOWN: {
+                        player_entity.pos.y += player.knockback_speed;
+                        
+                        if(!EntityCollidingWithSolidTile(&player_entity, &map, &display)) {
+                            player.pos.y = player_entity.pos.y;
+                        }
+                    } break;
+
+                    case LEFT: {
+                        player_entity.pos.x -= player.knockback_speed;
+                        
+                        if(!EntityCollidingWithSolidTile(&player_entity, &map, &display)) {
+                            player.pos.x = player_entity.pos.x;
+                        }
+                    } break;
+
+                    case RIGHT: {
+                        player_entity.pos.x += player.knockback_speed;
+                        
+                        if(!EntityCollidingWithSolidTile(&player_entity, &map, &display)) {
+                            player.pos.x = player_entity.pos.x;
+                        }
+                    } break;
+                }
+            }
+
+            // Player Activation
+            i32 tile_pos_data;
+            if((tile_pos_data = PlayerOnFloorButton(&player, &map)) != -1) {
+                i32 x = (tile_pos_data >> 16) & 0x0000FFFF;
+                i32 y = tile_pos_data & 0x0000FFFF;
+                u32 tile_data = map.tile_data[y * map.width + x];
+                u16 tile_id = (u16)((tile_data >> 16) & 0x0000FFFF);
+                u16 tile_extra_data = (u16)(tile_data & 0x0000FFFF);
+
+                switch(tile_id) {
+                    case TILE_BUTTON_UNACTIVATED: {
+                        Mix_PlayChannel(-1, button_activation_sound, 0);
+                        i32 baricade_tile_x = tile_extra_data % map.width;
+                        i32 baricade_tile_y = tile_extra_data / map.width;
+                        ReplaceAllSameAdjacentTiles(&map, baricade_tile_x, baricade_tile_y, TILE_BARRICATE_VIRTICAL, TILE_DIRT);
+                        ReplaceAllSameAdjacentTiles(&map, baricade_tile_x, baricade_tile_y, TILE_BARRICATE_HORIZONTAL, TILE_DIRT);
+                        map.tile_data[y * map.width + x] = (TILE_BUTTON_ACTIVATED << 16) | TILE_NO_EXTRA_DATA;
+                    } break;
+                }
+
+            }
+
+            // Player Attack
+            if(attacked) {
+                if(player.anim_state == ANIM_STATE_ATTACK) {
+                    player.anim_frame = (player.anim_frame == 0) ? 1 : 0;
+                }else {
+                    player.anim_state = ANIM_STATE_ATTACK;
+                }
+
+                player.anim_timer = PLAYER_ATTACK_ANIMATION_TIME;
+
+                for(i32 i = 0; i < enemy_list.num_enemies; i++) {
+                    Enemy* enemy = &enemy_list.enemies[i];
+                    if(!enemy->alive) {
+                        continue;
+                    }
+
+                    Entity enemy_entity = {enemy->pos, enemy->size};
+                    Entity player_entity = {player.pos, player.size};
+
+                    if(EntityCollidingWithEntity(&player_entity, &enemy_entity)) {
+                        Mix_PlayChannel(-1, hit_sound, 0);
+
+                        enemy->health -= player.damage;
+                        enemy->knockback_frames = 6;
+                        enemy->knockback_direction = player.direction;
+                        enemy->knockback_speed = PLAYER_PUNCH_KNOCKBACK_SPEED;
+
+                        if(enemy->health <= 0) {
+                            Mix_PlayChannel(-1, death_sound, 0);
+                            enemy->alive = false;
+                            enemy_list.num_alive_enemies--;
+                        }
+                    }
+                }
+            }
+
+            if(!moved && player.anim_state == ANIM_STATE_WALK) {
+                player.anim_state = ANIM_STATE_IDLE;
+            }
+            else if(moved && player.anim_state == ANIM_STATE_IDLE) {
+                player.anim_state = ANIM_STATE_WALK;
+                // Start at 0 so the we advance the frames as soon as we start moving.
+                player.anim_timer = 0;
+            }
+
+            if(player.anim_state != ANIM_STATE_IDLE && player.anim_timer <= 0) {
+                player.anim_frame = (player.anim_frame == 0) ? 1 : 0;
+                switch(player.anim_state) {
+                    case ANIM_STATE_WALK: {
+                        player.anim_timer = PLAYER_WALK_ANIMATION_TIME;
+                    } break;
+
+                    case ANIM_STATE_ATTACK: {
+                        player.anim_timer = 0;
+                        player.anim_state = ANIM_STATE_IDLE;
+                    } break;
+                }
+            }
+
+            display.camera_pos = {player.pos.x - (display.camera_size.w / 2), 
+                                  player.pos.y - (display.camera_size.h / 2)};
         }
-
-
-        display.camera_pos = {player.pos.x - (display.camera_size.w / 2), 
-                              player.pos.y - (display.camera_size.h / 2)};
 
         // Clear renderer
         SDL_RenderClear(display.renderer);
@@ -1002,8 +1016,54 @@ i32 main(i32 argc, char** argv) {
         }
 
         // Update Display
+        if(animating_map) {
+            // speeding up
+            if(map_animation_step == 0) {
+                map_rot_speed += MAP_ROT_ANIM_SPEED_MODIFIER;
+                if(map_rot_speed >= MAX_MAP_ROT_SPEED) {
+                   map_animation_step = 1; 
+                }
+
+                map_rot += map_rot_speed;
+            }
+            // slowing down
+            else if(map_animation_step == 1) {
+                map_rot_speed -= MAP_ROT_ANIM_SPEED_MODIFIER;
+                if(map_rot_speed <= 0) {
+                    map_rot_speed = 0;
+                    if(map_rot < 180) {
+                        map_rot += MAP_ROT_ANIM_SPEED_MODIFIER;
+                    }
+                    else if(map_rot > 180) {
+                        map_rot -= MAP_ROT_ANIM_SPEED_MODIFIER;
+                    }
+                    else if(map_rot == 180) {
+                        map_flip = (SDL_RendererFlip)(SDL_FLIP_VERTICAL | SDL_FLIP_HORIZONTAL);
+                        map_animation_step = 2;
+                    }
+                }
+                else {
+                    map_rot += map_rot_speed;
+                }
+            }
+            // flip and reload map
+            else if(map_animation_step == 2) {
+                SDL_Delay(500);
+                LoadEnemiesList(&enemy_list, &map);
+                player.pos = player_start_pos;
+                map_flip = SDL_FLIP_NONE;
+                map_rot = 0;
+                map_animation_step = 0;
+                animating_map = false;
+            }
+            
+            if(map_rot >= 360) {
+                map_rot = 0;
+            }
+        }
+
         SDL_UpdateTexture(display.texture, 0, display.pixel_buffer.pixels, display.pixel_buffer.pitch);
-        SDL_RenderCopy(display.renderer, display.texture, NULL, NULL);
+        SDL_RenderCopyEx(display.renderer, display.texture, 0, 0, map_rot, 0, map_flip);
         SDL_RenderPresent(display.renderer);
 
         // Handle Framerate crap
