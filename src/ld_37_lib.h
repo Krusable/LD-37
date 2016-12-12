@@ -250,6 +250,11 @@ void RenderString(Display* display, Font* font, Vec2* pos, char* string, u32 col
     i32 characters_wide = font->texture_sheet.width / font->char_width;
     i32 characters_high = font->texture_sheet.height / font->char_height;
     for(char* s = string; *s != '\0'; s++) {
+        if(*s == ' ') {
+            char_num++;
+            continue;
+        }
+
         Vec2 render_pos = {x_min + (char_num * (font->char_width + font->char_spacing)), y_min};
         bool found = false;
         i32 i = 0;
@@ -261,11 +266,11 @@ void RenderString(Display* display, Font* font, Vec2* pos, char* string, u32 col
         }
 
         if(found) {
-            if(*s == 'p' || *s == 'y', *s == 'q', *s == 'j') {
+            if(*s == 'p' || *s == 'y' || *s == 'q' || *s == 'j' || *s == 'g') {
                 render_pos.y += font->tailed_char_offset;
             }
 
-            i32 sub_tex_y = (i / characters_high) * font->char_height;
+            i32 sub_tex_y = (i / characters_wide) * font->char_height;
             i32 sub_tex_x = (i % characters_wide) * font->char_width;
             // NOTE (Mathew): Revert back to meters because RenderSubTexture will convert from meters to pixels.
             render_pos.x /= display->pixels_per_meter;
@@ -362,18 +367,20 @@ void FreeFileReadResult(File_Read_Result* file_read_result) {
     file_read_result->size = 0;
 }
 
-char char_set[36] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+char char_set[67] = {
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '/', '.', ',', '!', ':'};
 
 void LoadFont(Font* font, SDL_PixelFormat* format) {
-    font->char_set_size = 36;
+    font->char_set_size = 67;
     font->char_set = char_set;
-    font->char_width = 32;
-    font->char_height = 32;
-    font->tailed_char_offset = 16;
-    font->char_spacing = 0;
+    font->char_width = 8;
+    font->char_height = 12;
+    font->tailed_char_offset = 5;
+    font->char_spacing = 1;
 
-    LoadTexture("../res/textures/font_texture.png", &font->texture_sheet, format);
+    LoadTexture("../res/textures/font_sheet.png", &font->texture_sheet, format);
 }
 
 void FreeFont(Font* font) {
