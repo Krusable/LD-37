@@ -9,8 +9,8 @@ set src_dir=W:\dev\c++\ld_37_game\src
 set libs=SDL2.lib SDL2main.lib SDL2_image.lib SDL2_mixer.lib
 set source_files=%src_dir%\ld_37.cpp
 set macros=
-set compiler_flags=/Zi /MD /EHsc
-set linker_flags=/SUBSYSTEM:CONSOLE
+set compiler_flags=/Zi /MD /EHsc /O2
+set linker_flags=/SUBSYSTEM:WINDOWS
 set executable=ld_37.exe
 
 pushd bin

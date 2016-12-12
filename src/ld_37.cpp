@@ -47,6 +47,9 @@ public:
     bool has_sword;
     bool has_shield;
     bool has_grapple;
+    Sub_Texture_Data sword_attack_anim_tex_data;
+    Sub_Texture_Data blocking_anim_tex_data;
+    bool blocking;
 };
 
 class Enemy : public Mob {
@@ -86,7 +89,6 @@ typedef struct {
     Vec2 player_start_pos;
 } Map;
 
-
 typedef struct {
     bool live;
     i32 time_left;
@@ -123,13 +125,11 @@ const f32 MAX_MAP_ROT_SPEED                 = 53;
 #define HUD_TEXT_COLOUR                     0xFFEEEEEE
 #define POTION_HEAL_VALUE                   5
 #define DISPLAY_SCALE                       3.5
-#define WINDOW_FLAGS                        SDL_WINDOW_SHOWN /* | SDL_WINDOW_MAXIMIZED  */
+#define WINDOW_FLAGS                        SDL_WINDOW_SHOWN  | SDL_WINDOW_MAXIMIZED
 #define WINDOW_WIDTH                        1280
 #define WINDOW_HEIGHT                       (WINDOW_WIDTH * 9 / 16)
 #define TARGET_MS_PER_FRAME                 16
 #define CAP_FRAMERATE                       1
-#define PLAYER_COLLISION_ON                 1
-#define UPDATE_ENEMIES                      0
 
 #define UP                                  0
 #define DOWN                                1
@@ -155,6 +155,9 @@ const Vec2 TILE_SIZE_IN_METERS              = {(i32)TILE_SIZE / PIXELS_PER_METER
 
 #define CHEST_TILE_CONTENTS_POTION          0
 #define CHEST_TILE_CONTENTS_BOMB            1
+#define CHEST_TILE_CONTENTS_GRAPPLE         2
+#define CHEST_TILE_CONTENTS_SWORD           3
+#define CHEST_TILE_CONTENTS_SHEILD          4
 
 #define ACTION_STATE_IDLE                   0
 #define ACTION_STATE_WALK                   1
@@ -166,9 +169,11 @@ const Vec2 TILE_SIZE_IN_METERS              = {(i32)TILE_SIZE / PIXELS_PER_METER
 #define PLAYER_WALK_ANIMATION_TIME          300
 #define PLAYER_ATTACK_ANIMATION_TIME        300
 #define PLAYER_SPEED                        4.2
-#define PLAYER_HEALTH                       20
-#define PLAYER_DAMAGE                       2
-#define PLAYER_PUNCH_KNOCKBACK_SPEED        0.30
+#define PLAYER_HEALTH                       25
+#define PLAYER_PUNCH_DAMAGE                 2
+#define PLAYER_SWORD_DAMAGE                 4
+#define PLAYER_PUNCH_KNOCKBACK_SPEED        0.50
+#define PLAYER_SWORD_KNOCKBACK_SPEED        0.30
 
 #define ENEMIES_LIST_SIZE                   100
 #define DEMON_HITBOX_WIDTH                  (13.0 / PIXELS_PER_METER)
@@ -182,7 +187,7 @@ const Vec2 TILE_SIZE_IN_METERS              = {(i32)TILE_SIZE / PIXELS_PER_METER
 #define DEMON_ATTACK_ANIMATION_TIME_FRAME_1 400
 #define DEMON_CHASE_SPEED                   3.3
 #define DEMON_WANDER_SPEED                  3.1
-#define DEMON_HEALTH                        10
+#define DEMON_HEALTH                        8
 #define DEMON_DAMAGE                        2
 #define DEMON_ATTACK_KNOCKBACK_SPEED        0.4
 
@@ -197,7 +202,7 @@ const Vec2 TILE_SIZE_IN_METERS              = {(i32)TILE_SIZE / PIXELS_PER_METER
 #define WRAITH_ATTACK_ANIMATION_TIME_FRAME_1 400
 #define WRAITH_CHASE_SPEED                   3.3
 #define WRAITH_WANDER_SPEED                  3.1
-#define WRAITH_HEALTH                        20
+#define WRAITH_HEALTH                        16
 #define WRAITH_DAMAGE                        3
 #define WRAITH_ATTACK_KNOCKBACK_SPEED        0.4
 
@@ -258,7 +263,7 @@ Tile tile_set[13] = {
     {{128, 0, TILE_SIZE, TILE_SIZE}, TILE_SIZE_IN_METERS, true},    // gem
     {{144, 0, TILE_SIZE, TILE_SIZE}, TILE_SIZE_IN_METERS, true},    // chest unopened
     {{160, 0, TILE_SIZE, TILE_SIZE}, TILE_SIZE_IN_METERS, true},    // chest opended
-    {{176, 0, TILE_SIZE, TILE_SIZE}, TILE_SIZE_IN_METERS, true},    // void
+    {{176, 0, TILE_SIZE, TILE_SIZE}, TILE_SIZE_IN_METERS, false},    // void
     {{192, 0, TILE_SIZE, TILE_SIZE}, TILE_SIZE_IN_METERS, true}     // rock
 };
 
@@ -424,6 +429,7 @@ void LoadMap(Game_State* game_state, SDL_PixelFormat* pixel_format, u8 map_id) {
             Texture map_file_texture;
             LoadTexture("../res/textures/map1.png", &map_file_texture, pixel_format);
             LoadTileDataFromTexture(game_state, &map_file_texture);
+            game_state->player.pos = game_state->map.player_start_pos;
             
             for(i32 y = 0; y < game_state->map.height; y++) {
                 for(i32 x = 0; x < game_state->map.width; x++) {
@@ -484,7 +490,67 @@ void LoadMap(Game_State* game_state, SDL_PixelFormat* pixel_format, u8 map_id) {
             Texture map_file_texture;
             LoadTexture("../res/textures/map2.png", &map_file_texture, pixel_format);
             LoadTileDataFromTexture(game_state, &map_file_texture);
+            game_state->player.pos = game_state->map.player_start_pos;
 
+            for(i32 y = 0; y < game_state->map.height; y++) {
+                for(i32 x = 0; x < game_state->map.width; x++) {
+                    u32 tile_data = game_state->map.tile_data[y * game_state->map.width + x];
+                    u16 tile_id = (u16)((tile_data >> 16) & 0x0000FFFF);
+                    switch(tile_id) {
+                        case TILE_BARRICATE_VIRTICAL: {
+                            // switch the door to a horizontal door if there are brick 
+                            // tiles or other door tiles horizontally adjacent to them
+                            u16 tile_adj_left_id = u16((game_state->map.tile_data[(y * game_state->map.width) + (x - 1)] >> 16) & 0x0000FFFF);
+                            u16 tile_adj_right_id = u16((game_state->map.tile_data[(y * game_state->map.width) + (x + 1)] >> 16) & 0x0000FFFF);
+
+                            if(tile_adj_left_id == TILE_BRICK || tile_adj_left_id == TILE_BARRICATE_VIRTICAL || 
+                               tile_adj_left_id == TILE_BARRICATE_HORIZONTAL || tile_adj_right_id == TILE_BRICK || 
+                               tile_adj_right_id == TILE_BARRICATE_VIRTICAL ||  tile_adj_right_id == TILE_BARRICATE_HORIZONTAL) {
+                                game_state->map.tile_data[y * game_state->map.width + x] = (TILE_BARRICATE_HORIZONTAL << 16) | TILE_NO_EXTRA_DATA;
+                            }
+                        } break;
+
+                        // set the tile extra data to the index of the first barricade tile the button opens.
+                        case TILE_BUTTON_UNACTIVATED: {
+                            u16 object_id = (u16)(tile_data & 0x0000FFFF);
+                            // Opens the barricade at (14, 22).
+                            if(object_id == 2) {
+                                game_state->map.tile_data[y * game_state->map.width + x] = (tile_id << 16) | (u16)806;
+                            }
+                            // Opens the barricade at (21, 22).
+                            else if(object_id == 3) {
+                                game_state->map.tile_data[y * game_state->map.width + x] = (tile_id << 16) | (u16)813;
+                            }
+
+                        } break;
+
+                        // set the tile extra data to what the chest contains
+                        case TILE_CHEST_UNOPENED: {
+                            u16 object_id = (u16)(tile_data & 0x0000FFFF);
+                            // This chest contains 3 potions.
+                            if(object_id == 1) {
+                                game_state->map.tile_data[y * game_state->map.width + x] = (tile_id << 16) | (u16)((CHEST_TILE_CONTENTS_POTION << 8) | (u8)5);
+                            }
+                            // This chest 4 bombs.
+                            else if(object_id == 4) {
+                                game_state->map.tile_data[y * game_state->map.width + x] = (tile_id << 16) | (u16)((CHEST_TILE_CONTENTS_BOMB << 8) | (u8)4);
+                            }
+                            // This chest contains sword.
+                            else if(object_id == 5) {
+                                game_state->map.tile_data[y * game_state->map.width + x] = (tile_id << 16) | (u16)((CHEST_TILE_CONTENTS_SWORD << 8) | (u8)1);
+                            }
+                            // This chest contains the sheild.
+                            else if(object_id == 6) {
+                                game_state->map.tile_data[y * game_state->map.width + x] = (tile_id << 16) | (u16)((CHEST_TILE_CONTENTS_SHEILD << 8) | (u8)1);
+                            }
+                            // This chest contains the 3 potions.
+                            else if(object_id == 7) {
+                                game_state->map.tile_data[y * game_state->map.width + x] = (tile_id << 16) | (u16)((CHEST_TILE_CONTENTS_POTION << 8) | (u8)3);
+                            }
+                        } break;
+                    }
+                }
+            }
             FreeTexture(&map_file_texture);
         } break;
 
@@ -694,10 +760,11 @@ void ClearEnemyList(Enemy_List* enemy_list) {
 
 void InitPlayState(Game_State* game_state, Display* display) {
     // Player
-    game_state->player.pos                          = game_state->map.player_start_pos;
     game_state->player.size                         = {PLAYER_HITBOX_WIDTH, PLAYER_HITBOX_HEIGHT};
     game_state->player.walk_anim_tex_data           = {0, 32, PLAYER_TEXTURE_SIZE, PLAYER_TEXTURE_SIZE};
     game_state->player.walk_attack_anim_tex_data    = {64, 32, PLAYER_TEXTURE_SIZE, PLAYER_TEXTURE_SIZE};
+    game_state->player.sword_attack_anim_tex_data   = {0, 64, PLAYER_TEXTURE_SIZE, PLAYER_TEXTURE_SIZE};
+    game_state->player.blocking_anim_tex_data       = {64, 80, PLAYER_TEXTURE_SIZE, PLAYER_TEXTURE_SIZE};
     game_state->player.direction                    = 1;
     game_state->player.speed                        = 4.2;
     game_state->player.anim_state                   = ACTION_STATE_IDLE;
@@ -706,13 +773,14 @@ void InitPlayState(Game_State* game_state, Display* display) {
     game_state->player.knockback_frames             = 0;
     game_state->player.knockback_direction          = 0;
     game_state->player.health                       = PLAYER_HEALTH;
-    game_state->player.damage                       = PLAYER_DAMAGE;
+    game_state->player.damage                       = PLAYER_PUNCH_DAMAGE;
     game_state->player.knockback_speed              = 0;
     game_state->player.has_sword                    = false;
     game_state->player.has_shield                   = false;
     game_state->player.has_grapple                  = false;
-    game_state->player.potions                      = 3;
+    game_state->player.potions                      = 4;
     game_state->player.bombs                        = 0;
+    game_state->player.blocking                     = false;
 
     // UI
     game_state->hud_size = {(f32)display->pixel_buffer.width / PIXELS_PER_METER, display->pixel_buffer.height / 3.5 / PIXELS_PER_METER};
@@ -1079,11 +1147,24 @@ i32 main(i32 argc, char** argv) {
                                     if(EntityCollidingWithEntity(&enemy_entity, &player_entity)) {
                                         Mix_PlayChannel(-1, hit_sound, 0);
 
-                                        game_state.player.health -= enemy->damage;
+                                        if(game_state.player.blocking && 
+                                           ((game_state.player.direction == UP && enemy->pos.y <= game_state.player.pos.y) ||
+                                            (game_state.player.direction == DOWN && enemy->pos.y >= game_state.player.pos.y) ||
+                                            (game_state.player.direction == LEFT && enemy->pos.x <= game_state.player.pos.x) ||
+                                            (game_state.player.direction == RIGHT && enemy->pos.x <= game_state.player.pos.x))) {
 
-                                        game_state.player.knockback_frames = 6;
-                                        game_state.player.knockback_direction = enemy->direction;
-                                        game_state.player.knockback_speed = DEMON_ATTACK_KNOCKBACK_SPEED;
+                                            game_state.player.knockback_frames = 6;
+                                            game_state.player.knockback_direction = enemy->direction;
+                                            game_state.player.knockback_speed = DEMON_ATTACK_KNOCKBACK_SPEED + 0.2;
+                                        }
+                                        else {
+                                            game_state.player.knockback_frames = 6;
+                                            game_state.player.knockback_direction = enemy->direction;
+                                            game_state.player.knockback_speed = DEMON_ATTACK_KNOCKBACK_SPEED;
+                                            game_state.player.health -= enemy->damage;
+                                        }
+
+
 
                                         if(game_state.player.health <= 0) {
                                             Mix_PlayChannel(-1, death_sound, 0);
@@ -1151,7 +1232,18 @@ i32 main(i32 argc, char** argv) {
                     }
 
                     if(game_state.enemy_list.num_alive_enemies == 0) {
-                        game_state.update_and_render_state = WIN_STATE;
+                        if(game_state.current_map == MAP_LEVEL_1) {
+                            game_state.current_map = MAP_LEVEL_2;
+                            LoadMap(&game_state, display.pixel_format, MAP_LEVEL_2);
+                        }
+                        else if(game_state.current_map == MAP_LEVEL_2) {
+                            game_state.current_map = MAP_LEVEL_3;
+                            LoadMap(&game_state, display.pixel_format, MAP_LEVEL_3);
+                        }
+
+                        else if(game_state.current_map == MAP_LEVEL_3) {
+                            game_state.update_and_render_state = WIN_STATE;
+                        }
                     }
 
                     // Update Player
@@ -1205,6 +1297,20 @@ i32 main(i32 argc, char** argv) {
                             if(!EntityCollidingWithSolidTile(&temp_player, &game_state.map, &display)) {
                                 game_state.player.pos.x = temp_player.pos.x;
                             }
+                        }
+                    }
+
+                    bool blocking = false;
+                    if(keys_state[USE_SHEILD_KEY] && !attacked && game_state.player.has_shield) {
+                        if(!game_state.player.blocking) {
+                            game_state.player.blocking = true;
+                        }
+                        blocking = true;
+                    }
+
+                    if(!blocking) {
+                        if(game_state.player.blocking) {
+                            game_state.player.blocking = false;
                         }
                     }
 
@@ -1287,7 +1393,19 @@ i32 main(i32 argc, char** argv) {
 
                                 case CHEST_TILE_CONTENTS_BOMB: {
                                     game_state.player.bombs += (i32)item_quantity;
-                                }
+                                } break;
+
+                                case CHEST_TILE_CONTENTS_GRAPPLE: {
+                                    game_state.player.has_grapple = true;
+                                } break;
+
+                                case CHEST_TILE_CONTENTS_SWORD: {
+                                    game_state.player.has_sword = true;
+                                } break;
+
+                                case CHEST_TILE_CONTENTS_SHEILD: {
+                                    game_state.player.has_shield = true;
+                                } break;
                             }
 
                             game_state.map.tile_data[y * game_state.map.width + x] = (TILE_CHEST_OPENED << 16) | TILE_NO_EXTRA_DATA;
@@ -1322,12 +1440,18 @@ i32 main(i32 argc, char** argv) {
                             Entity player_entity = {game_state.player.pos, game_state.player.size};
 
                             if(EntityCollidingWithEntity(&player_entity, &enemy_entity)) {
-                                Mix_PlayChannel(-1, hit_sound, 0);
 
-                                enemy->health -= game_state.player.damage;
                                 enemy->knockback_frames = 6;
                                 enemy->knockback_direction = game_state.player.direction;
-                                enemy->knockback_speed = PLAYER_PUNCH_KNOCKBACK_SPEED;
+                                Mix_PlayChannel(-1, hit_sound, 0);
+                                if(game_state.player.has_sword) {
+                                    enemy->health -= PLAYER_SWORD_DAMAGE;
+                                    enemy->knockback_speed = PLAYER_SWORD_KNOCKBACK_SPEED;
+                                }
+                                else {
+                                    enemy->health -= PLAYER_PUNCH_DAMAGE;
+                                    enemy->knockback_speed = PLAYER_PUNCH_KNOCKBACK_SPEED;
+                                }
 
                                 if(enemy->health <= 0) {
                                     Mix_PlayChannel(-1, death_sound, 0);
@@ -1373,7 +1497,7 @@ i32 main(i32 argc, char** argv) {
                 // Clear renderer
                 SDL_RenderClear(display.renderer);
                 for(i32 i = 0; i < display.pixel_buffer.height * display.pixel_buffer.width; i++) {
-                    *((u32*)display.pixel_buffer.pixels + i) = 0xFF00FFFF;
+                    *((u32*)display.pixel_buffer.pixels + i) = 0xFF000000;
                 }
 
                 // Render map
@@ -1405,10 +1529,25 @@ i32 main(i32 argc, char** argv) {
                 i32 pstx = game_state.player.walk_anim_tex_data.x + (game_state.player.direction * pstw);
                 i32 psty = game_state.player.walk_anim_tex_data.y + (game_state.player.anim_frame * psth);
                 if(game_state.player.anim_state == ACTION_STATE_ATTACK) {
-                    pstw = game_state.player.walk_attack_anim_tex_data.width;
-                    psth = game_state.player.walk_attack_anim_tex_data.height;
-                    pstx = game_state.player.walk_attack_anim_tex_data.x + (game_state.player.direction * pstw);
-                    psty = game_state.player.walk_attack_anim_tex_data.y + (game_state.player.anim_frame * psth);
+                    if(game_state.player.has_sword) {
+                        pstw = game_state.player.sword_attack_anim_tex_data.width;
+                        psth = game_state.player.sword_attack_anim_tex_data.height;
+                        pstx = game_state.player.sword_attack_anim_tex_data.x + (game_state.player.direction * pstw);
+                        psty = game_state.player.sword_attack_anim_tex_data.y + (game_state.player.anim_frame * psth);
+                        
+                    }
+                    else {
+                        pstw = game_state.player.walk_attack_anim_tex_data.width;
+                        psth = game_state.player.walk_attack_anim_tex_data.height;
+                        pstx = game_state.player.walk_attack_anim_tex_data.x + (game_state.player.direction * pstw);
+                        psty = game_state.player.walk_attack_anim_tex_data.y + (game_state.player.anim_frame * psth);
+                    }
+                }
+                else if(game_state.player.blocking) {
+                    pstw = game_state.player.blocking_anim_tex_data.width;
+                    psth = game_state.player.blocking_anim_tex_data.height;
+                    pstx = game_state.player.blocking_anim_tex_data.x + (game_state.player.direction * pstw);
+                    psty = game_state.player.blocking_anim_tex_data.y;
                 }
 
                 Vec2 camera_relevent_pos = {game_state.player.pos.x - display.camera_pos.x, game_state.player.pos.y - display.camera_pos.y};
@@ -1482,7 +1621,7 @@ i32 main(i32 argc, char** argv) {
                             }
 
                             RenderSubTexture(&display, &item_box->pos, &game_state.texture_sheet, item_box->icon_tex_data.x, 
-                                            item_box->icon_tex_data.y, item_box->icon_tex_data.width, 
+                                            icon_tex_y, item_box->icon_tex_data.width, 
                                             item_box->icon_tex_data.height);
                         } break;
 
@@ -1692,35 +1831,37 @@ i32 main(i32 argc, char** argv) {
 #endif 
         // Update the animation timers
         if(game_state.update_and_render_state == PLAY_STATE) {
-                // Update Bombs
-                if(game_state.bombs) {
-                    for(i32 i = 0; i < MAX_NUM_BOMBS; i++) {
-                        Bomb* bomb = &game_state.bombs[i];
+            // Update Bombs
+            if(game_state.bombs) {
+                for(i32 i = 0; i < MAX_NUM_BOMBS; i++) {
+                    Bomb* bomb = &game_state.bombs[i];
 
-                        if(!bomb->live) {
-                            continue;
-                        }
+                    if(!bomb->live) {
+                        continue;
+                    }
 
-                        bomb->time_left -= ms_this_frame;
-                        bomb->anim_timer -= ms_this_frame;
-                        if(bomb->time_left <= 0) {
-                            bomb->live = false;
-                            game_state.num_bombs--;
-                            Mix_PlayChannel(-1, bomb_explosion_sound, 0);
-                            i32 tile_x = bomb->pos.x * PIXELS_PER_METER / TILE_SIZE;
-                            i32 tile_y = bomb->pos.y * PIXELS_PER_METER / TILE_SIZE;
-                            ReplaceAllSameAdjacentTilesRecursivly(&game_state.map, tile_x, tile_y, TILE_BREAKABLE_BRICK, TILE_DIRT);
-                        } 
-                        if(bomb->anim_timer <= 0) {
-                            bomb->anim_frame = (bomb->anim_frame == 0) ? 1 : 0;
-                            bomb->anim_timer = BOMB_ANIM_TIME;
-                        }
+                    bomb->time_left -= ms_this_frame;
+                    bomb->anim_timer -= ms_this_frame;
+                    if(bomb->time_left <= 0) {
+                        bomb->live = false;
+                        game_state.num_bombs--;
+                        Mix_PlayChannel(-1, bomb_explosion_sound, 0);
+                        i32 tile_x = bomb->pos.x * PIXELS_PER_METER / TILE_SIZE;
+                        i32 tile_y = bomb->pos.y * PIXELS_PER_METER / TILE_SIZE;
+                        ReplaceAllSameAdjacentTilesRecursivly(&game_state.map, tile_x, tile_y, TILE_BREAKABLE_BRICK, TILE_DIRT);
+                    } 
+                    if(bomb->anim_timer <= 0) {
+                        bomb->anim_frame = (bomb->anim_frame == 0) ? 1 : 0;
+                        bomb->anim_timer = BOMB_ANIM_TIME;
                     }
                 }
+            }
 
-            if(game_state.player.anim_state != ACTION_STATE_IDLE) {
+            // No animation for blocking so don't update the animation
+            if(game_state.player.anim_state != ACTION_STATE_IDLE && !game_state.player.blocking) {
                 game_state.player.anim_timer -= ms_this_frame;
             }
+            
             for(i32 i = 0; i < game_state.enemy_list.num_enemies; i++) {
                 Enemy* enemy = &game_state.enemy_list.enemies[i];
                 if(!enemy->alive) {
